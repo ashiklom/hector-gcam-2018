@@ -1,0 +1,146 @@
+---
+title: A tour of the Hector R interface
+author: Alexey Shiklomanov
+output:
+  xaringan::moon_reader
+---
+
+```{r, setup, include = FALSE}
+knitr::opts_chunk$set(cache = TRUE)
+
+# Invisible versions of Hector functions so they don't pollute the output
+run <- function(...) invisible(hector::run(...))
+reset <- function(...) invisible(hector::reset(...))
+```
+
+# Install directly from GitHub
+
+```{r install, eval = FALSE}
+Sys.setenv(
+  BOOSTROOT = "/path/to/boost/include",
+  BOOSTLIB = "/path/to/boost/lib"
+)
+devtools::install_github("jgcri/hector")
+```
+
+---
+
+# Lightning introduction
+
+```{r}
+library(hector)
+ini_file <- system.file(
+  "input/hector_rcp45.ini",
+  package = "hector"
+)
+core <- newcore(ini_file)
+run(core)
+results <- fetchvars(core, dates = 2000:2100)
+head(results)
+```
+
+---
+
+### Lightning introduction (continued)
+
+```{r, fig.width = 6, fig.height = 3.3, fig.align = "center"}
+results$variable_unit <- with(results, {
+  sprintf("%s (%s)", variable, units) 
+})
+library(ggplot2)
+ggplot(results) +
+  aes(x = year, y = value) +
+  geom_line() +
+  facet_wrap(~variable_unit, scales = "free_y")
+```
+
+---
+
+## Retrieving parameters
+
+```{r}
+fetchvars(core, dates = NA, vars = c(BETA(), Q10_RH(), ECS()))
+```
+
+`BETA` is the CO<sub>2</sub> fertilization factor.
+
+`Q10_RH` is the sensitivity of heterotropihc respiration to temperature.
+
+`ECS` is the equilibrium climate sensitivity.
+
+...and more! See `?hector::parameters`.
+
+---
+
+## Setting parameters
+
+Increase `BETA` to 0.4 and re-run the RCP 4.5 scenario.
+
+```{r}
+setvar(
+  core,
+  dates = NA,
+  var = BETA(),
+  value = 0.4,
+  unit = "(unitless)"
+)
+
+reset(core)
+run(core)
+new_results <- fetchvars(core, 2000:2100)
+```
+
+--
+
+Combine with previous results.
+
+```{r}
+new_results$beta <- 0.4 
+new_results$variable_unit <- with(new_results, {
+  sprintf("%s (%s)", variable, units)
+})
+results$beta <- 0.36
+both_results <- rbind(new_results, results)
+```
+
+---
+
+```{r, fig.align = "center"}
+ggplot(both_results) +
+  aes(x = year, y = value, color = factor(beta)) +
+  geom_line() +
+  facet_wrap(~variable_unit, scales = "free_y") +
+  guides(color = guide_legend(title = expression(beta)))
+```
+
+---
+
+## Case study: Parameter sensitivity analysis
+
+```{r}
+run_with_beta <- function(value) {
+  setvar(core, NA, BETA(), value, "(unitless)")
+  reset(core)
+  run(core)
+  result <- fetchvars(core, 2000:2300)
+  result[["beta"]] <- value
+  result[["variable_unit"]] <- with(result, {
+    sprintf("%s (%s)", variable, units)
+  })
+  result
+}
+
+mapped <- Map(run_with_beta, seq(0, 1, 0.05))
+sensitivity_beta <- Reduce(rbind, mapped)
+```
+
+---
+
+```{r, fig.align = "center", fig.with = 6, fig.height = 4.8}
+ggplot(sensitivity_beta) +
+  aes(x = year, y = value, color = beta, group = beta) +
+  geom_line() +
+  facet_wrap(~variable_unit, scales = "free_y") +
+  guides(color = guide_colorbar(title = expression(beta))) +
+  scale_color_viridis_c()
+```
